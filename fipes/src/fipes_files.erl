@@ -39,21 +39,33 @@ index(Fipe, Req) ->
     cowboy_http_req:reply(200, Headers, Results, Req).
 
 
+% FIXME: Handle 404
 download(Fipe, File, Req) ->
     % Register the downloader
     Uid = uid(),
     ets:insert(downloaders, {{Fipe, Uid}, self()}),
 
-    Name = name(Fipe, File),
+    io:format("Req: ~p~n", [Req]),
+
+    Name  = name(Fipe, File),
+    Range = range(Req),
 
     Headers =
-        [{<<"Content-Type">>,        <<"application/octet-stream">>},
+        [
+         {<<"Content-Type">>,        <<"application/octet-stream">>},
          {<<"Content-Disposition">>, [<<"attachment; filename=\"">>, Name, <<"\"">>]}
         ],
+
+    Status =
+        if
+            Range == [] -> 200;
+            true -> 206
+        end,
+
     {ok, Req2} = cowboy_http_req:chunked_reply(200, Headers, Req),
 
     % Ask the file owner to start the stream
-    owner(Fipe, File) ! {stream, File, Uid},
+    owner(Fipe, File) ! {stream, File, Uid, Range},
 
     stream(Fipe, Uid, Req2).
 
@@ -66,6 +78,25 @@ owner(Fipe, File) ->
 name(Fipe, File) ->
     [{{Fipe, File}, {_Uid, FileInfos}}] = ets:lookup(files, {Fipe, File}),
     proplists:get_value(name, FileInfos).
+
+range(Req) ->
+    case cowboy_http_req:header('Range', Req) of
+        {undefined, Req2} -> [];
+        {<<"bytes=", Range/binary>>, _Req2} ->
+            [Start, End] = binary:split(Range, <<"-">>),
+            Range2 = case End of
+                         <<>> -> [];
+                         _ ->
+                             End2 = list_to_integer(binary_to_list(End)),
+                             [{'end', End2}]
+                     end,
+            case Start of
+                <<>> -> Range2;
+                _ ->
+                    Start2 = list_to_integer(binary_to_list(Start)),
+                    [{start, Start2} | Range2]
+            end
+    end.
 
 
 stream(Fipe, Uid, Req) ->

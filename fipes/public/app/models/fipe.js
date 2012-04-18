@@ -35,7 +35,7 @@
                     if (callback) callback(event.uid);
                     break;
                 case "stream":
-                    that.stream(that.ws, event.file, event.downloader);
+                    that.stream(that.ws, event.file, event.downloader, event.range);
                     break;
                 case "file.new":
                     // Someone offers a new file.
@@ -61,10 +61,11 @@
             };
         },
 
-        stream: function(ws, fileId, downloader) {
+        stream: function(ws, fileId, downloader, range) {
             var file   = App.Files.get(fileId).get('obj');
             var reader = new FileReader;
-            var seek   = 0;
+            var seek   = range.start || 0;
+            var end    = range.end   || file.size;
             var slice  = 1024 * 512; // 512 KB
 
             // Make a portable slice method.
@@ -86,7 +87,9 @@
                 seek += slice;
 
                 // Continue to stream the file.
-                if (seek < file.size) {
+                if (seek < end) {
+                    if ((seek + slice) > end)
+                        slice = end - seek;
                     var blob = file.slice(seek, seek + slice);
                     reader.readAsBinaryString(blob);
                 // Stop the stream
@@ -96,9 +99,12 @@
                         downloader: downloader
                     });
                     ws.send(eos);
+                    console.log('eos');
                 }
             }
 
+            if ((seek + slice) > end)
+                slice = end - seek;
             var blob = file.slice(seek, seek + slice);
             reader.readAsBinaryString(blob);
         },
